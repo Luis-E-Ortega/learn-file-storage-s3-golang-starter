@@ -1,7 +1,8 @@
 package main
 
 import (
-	"fmt"
+	"encoding/base64"
+	"io"
 	"net/http"
 
 	"github.com/bootdotdev/learn-file-storage-s3-golang-starter/internal/auth"
@@ -28,10 +29,48 @@ func (cfg *apiConfig) handlerUploadThumbnail(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
+	const maxMemory = 10 << 20
+	if err := r.ParseMultipartForm(maxMemory); err != nil {
+		respondWithError(w, http.StatusBadRequest, "invalid multipart form", err)
+		return
+	}
 
-	fmt.Println("uploading thumbnail for video", videoID, "by user", userID)
+	file, header, err := r.FormFile("thumbnail")
+	if err != nil {
+		respondWithError(w, http.StatusBadRequest, "unable to parse form file", err)
+		return
+	}
+	defer file.Close()
 
-	// TODO: implement the upload here
+	medType := header.Header.Get("Content-Type")
 
-	respondWithJSON(w, http.StatusOK, struct{}{})
+	dat, err := io.ReadAll(file)
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "Couldn't read file", err)
+		return
+	}
+
+	video, err := cfg.db.GetVideo(videoID)
+	if err != nil {
+		respondWithError(w, http.StatusNotFound, "Video not found", err)
+		return
+	}
+	if video.UserID != userID {
+		respondWithError(w, http.StatusUnauthorized, "Not authorized to access videos for this account", err)
+		return
+	}
+
+	thumbnailString := base64.StdEncoding.EncodeToString(dat)
+	dataURL := "data:" + medType + ";base64," + thumbnailString
+	video.ThumbnailURL = &dataURL
+
+	err = cfg.db.UpdateVideo(video)
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "Unable to update video", err)
+		return
+	}
+
+	//fmt.Println("uploading thumbnail for video", videoID, "by user", userID)
+
+	respondWithJSON(w, http.StatusOK, video)
 }
