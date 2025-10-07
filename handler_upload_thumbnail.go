@@ -1,9 +1,12 @@
 package main
 
 import (
-	"encoding/base64"
+	"fmt"
 	"io"
+	"mime"
 	"net/http"
+	"os"
+	"path/filepath"
 
 	"github.com/bootdotdev/learn-file-storage-s3-golang-starter/internal/auth"
 	"github.com/google/uuid"
@@ -41,12 +44,13 @@ func (cfg *apiConfig) handlerUploadThumbnail(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	defer file.Close()
-
-	medType := header.Header.Get("Content-Type")
-
-	dat, err := io.ReadAll(file)
+	mediaType, _, err := mime.ParseMediaType(header.Header.Get("Content-Type"))
 	if err != nil {
-		respondWithError(w, http.StatusInternalServerError, "Couldn't read file", err)
+		respondWithError(w, http.StatusBadRequest, "INvalid Content-Type", err)
+		return
+	}
+	if mediaType != "image/jpeg" && mediaType != "image/png" {
+		respondWithError(w, http.StatusBadRequest, "Invalid file type", nil)
 		return
 	}
 
@@ -60,9 +64,33 @@ func (cfg *apiConfig) handlerUploadThumbnail(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	thumbnailString := base64.StdEncoding.EncodeToString(dat)
-	dataURL := "data:" + medType + ";base64," + thumbnailString
-	video.ThumbnailURL = &dataURL
+	mimeToExt := map[string]string{
+		"image/png":  "png",
+		"image/jpeg": "jpg",
+		"image/webp": "webp",
+	}
+	ext, ok := mimeToExt[mediaType]
+	if !ok {
+		respondWithError(w, http.StatusBadRequest, "unsupported Content-Type for thumbnail", nil)
+		return
+	}
+	fileName := videoIDString + "." + ext
+	path := filepath.Join(cfg.assetsRoot, fileName)
+
+	f, err := os.Create(path)
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "failed to create file", err)
+		return
+	}
+	defer f.Close()
+
+	if _, err := io.Copy(f, file); err != nil {
+		respondWithError(w, http.StatusInternalServerError, "failed to write file", err)
+		return
+	}
+
+	url := fmt.Sprintf("http://localhost:%s/assets/%s", cfg.port, fileName)
+	video.ThumbnailURL = &url
 
 	err = cfg.db.UpdateVideo(video)
 	if err != nil {

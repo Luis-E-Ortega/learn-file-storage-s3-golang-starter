@@ -53,7 +53,7 @@ func main() {
 
 	assetsRoot := os.Getenv("ASSETS_ROOT")
 	if assetsRoot == "" {
-		log.Fatal("ASSETS_ROOT environment variable is not set")
+		assetsRoot = "./assets"
 	}
 
 	s3Bucket := os.Getenv("S3_BUCKET")
